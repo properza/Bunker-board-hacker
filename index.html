@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bypass8 - SCUM Bunker Solver & OCR Scanner</title>
+    <!-- Tesseract.js CDN for in-browser OCR -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        :root {
+            --gold: #bda36a;
+            --bg: #101214;
+            --green: #00ff41;
+            --red: #ff4444;
+            --blue: #44ffff;
+            --yellow: #ffd700;
+            --panel: #1b1e22;
+            --panel-border: #333940;
+            --accent: #e5a93c;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: #eee;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            margin: 0;
+            min-height: 100vh;
+        }
+
+        h1 {
+            color: var(--gold);
+            margin: 5px 0 10px 0;
+            font-size: 24px;
+            text-align: center;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(189, 163, 106, 0.4);
+        }
+
+        .main-layout {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            max-width: 1250px;
+            width: 100%;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        /* SCANNER PANEL */
+        .scanner-panel {
+            background: var(--panel);
+            border: 2px solid var(--panel-border);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+            width: 550px;
+            max-width: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .panel-title {
+            color: var(--gold);
+            font-size: 14px;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-bottom: 1px solid #333;
+            padding-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .btn-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .action-btn {
+            background: #252a30;
+            border: 1px solid var(--panel-border);
+            color: #ccc;
+            padding: 10px 8px;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .action-btn:hover {
+            background: #333a42;
+            color: white;
+            border-color: var(--gold);
+        }
+
+        .action-btn.primary {
+            background: var(--gold);
+            color: #000;
+            border: none;
+            grid-column: span 2;
+            font-size: 16px;
+            padding: 14px;
+        }
+
+        .action-btn.primary:hover {
+            background: #d6bc83;
+            box-shadow: 0 0 15px rgba(189, 163, 106, 0.5);
+        }
+
+        /* IMAGE CANVAS & CROPPER CONTAINER */
+        .image-wrapper {
+            position: relative;
+            width: 100%;
+            min-height: 400px;
+            max-height: 560px;
+            background: #090a0c;
+            border: 2px dashed #444;
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+
+        .image-wrapper.has-image {
+            border-style: solid;
+            border-color: var(--panel-border);
+        }
+
+        .drop-hint {
+            text-align: center;
+            color: #777;
+            padding: 20px;
+            pointer-events: none;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .drop-hint span {
+            color: var(--gold);
+            font-weight: bold;
+        }
+
+        #preview-img {
+            display: none;
+            max-width: 100%;
+            max-height: 560px;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        /* OVERLAY FRAMES */
+        .frame-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: none;
+        }
+
+        .crop-box {
+            position: absolute;
+            pointer-events: auto;
+            cursor: move;
+            touch-action: none;
+        }
+
+        .crop-box-label {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 2px 6px;
+            border-radius: 3px;
+            white-space: nowrap;
+            letter-spacing: 1px;
+        }
+
+        .crop-resize-handle {
+            position: absolute;
+            right: -6px;
+            bottom: -6px;
+            width: 14px;
+            height: 14px;
+            cursor: se-resize;
+            border-radius: 2px;
+        }
+
+        /* TWO SEPARATE COLUMN BOXES (A & B) */
+        #box-col-a {
+            border: 2px solid var(--yellow);
+            background: rgba(255, 215, 0, 0.08);
+        }
+
+        #box-col-a .crop-box-label {
+            background: var(--yellow);
+            color: black;
+        }
+
+        #box-col-a .crop-resize-handle {
+            background: var(--yellow);
+        }
+
+        #box-col-b {
+            border: 2px solid var(--yellow);
+            background: rgba(255, 215, 0, 0.08);
+        }
+
+        #box-col-b .crop-box-label {
+            background: var(--yellow);
+            color: black;
+        }
+
+        #box-col-b .crop-resize-handle {
+            background: var(--yellow);
+        }
+
+        /* 8-ROW COLUMN GRID */
+        .col-grid {
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-rows: repeat(8, 1fr);
+            pointer-events: none;
+        }
+
+        .col-cell {
+            border-bottom: 1px dashed rgba(255, 215, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .col-cell:last-child {
+            border-bottom: none;
+        }
+
+        /* Green text display target indicator inside each switch */
+        .col-cell .text-target {
+            position: absolute;
+            top: 6%;
+            left: 15%;
+            width: 70%;
+            height: 32%;
+            border: 1px solid rgba(0, 255, 65, 0.9);
+            background: rgba(0, 255, 65, 0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            color: #00ff41;
+            font-weight: bold;
+        }
+
+        /* Goal A (Red) */
+        #box-goala {
+            border: 2px solid var(--red);
+            background: rgba(255, 68, 68, 0.15);
+        }
+
+        #box-goala .crop-box-label {
+            background: var(--red);
+            color: white;
+        }
+
+        #box-goala .crop-resize-handle {
+            background: var(--red);
+        }
+
+        /* Goal B (Blue) */
+        #box-goalb {
+            border: 2px solid var(--blue);
+            background: rgba(68, 255, 255, 0.15);
+        }
+
+        #box-goalb .crop-box-label {
+            background: var(--blue);
+            color: black;
+        }
+
+        #box-goalb .crop-resize-handle {
+            background: var(--blue);
+        }
+
+        /* Input (Green) */
+        #box-input {
+            border: 2px solid var(--green);
+            background: rgba(0, 255, 65, 0.15);
+        }
+
+        #box-input .crop-box-label {
+            background: var(--green);
+            color: black;
+        }
+
+        #box-input .crop-resize-handle {
+            background: var(--green);
+        }
+
+        .ocr-review { border: 2px solid var(--yellow); }
+        #ocr-review-list {
+            display: grid;
+            gap: 8px;
+            max-height: 280px;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        #ocr-review-list:empty { display: none; }
+        /* STATUS & OCR PROGRESS */
+        #ocr-status {
+            font-size: 13px;
+            color: #ddd;
+            text-align: center;
+            min-height: 20px;
+            transition: color 0.3s;
+            line-height: 1.4;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 6px;
+            background: #222;
+            border-radius: 3px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--gold);
+            transition: width 0.2s;
+        }
+
+        /* GEMINI API OPTION ACCORDION */
+        .api-config {
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 8px 12px;
+            background: #141619;
+            font-size: 12px;
+        }
+
+        .api-config summary {
+            cursor: pointer;
+            color: var(--gold);
+            font-weight: bold;
+            outline: none;
+        }
+
+        .api-config input {
+            width: 100%;
+            margin-top: 8px;
+            font-size: 12px;
+            padding: 8px;
+        }
+
+        /* SOLVER MACHINE */
+        .machine {
+            background: var(--panel);
+            border: 3px solid var(--panel-border);
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 0 40px rgba(0, 0, 0, 0.7);
+            width: 520px;
+            max-width: 100%;
+        }
+
+        .header-section {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 15px;
+        }
+
+        .display {
+            background: #000;
+            border: 2px solid var(--gold);
+            padding: 8px;
+            text-align: center;
+            flex: 1;
+            border-radius: 4px;
+        }
+
+        .display label {
+            display: block;
+            font-size: 10px;
+            color: var(--gold);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        input {
+            background: #111;
+            border: 1px solid #444;
+            color: var(--green);
+            padding: 8px;
+            width: 85%;
+            text-align: center;
+            font-size: 18px;
+            font-family: inherit;
+            outline: none;
+            border-radius: 4px;
+        }
+
+        input:focus {
+            border-color: var(--gold);
+            box-shadow: 0 0 8px rgba(189, 163, 106, 0.4);
+        }
+
+        input.red-text {
+            color: var(--red);
+        }
+
+        input.blue-text {
+            color: var(--blue);
+        }
+
+        /* SWITCH ROWS */
+        .row {
+            display: grid;
+            grid-template-columns: 85px 1fr 1fr 50px;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+            background: #252a30;
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid #333a42;
+            transition: all 0.3s;
+        }
+
+        .row.active-on {
+            background: #14351a;
+            border-color: var(--green);
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.3);
+        }
+
+        .sw-num {
+            color: #aaa;
+            font-size: 12px;
+            text-align: left;
+            font-weight: bold;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .row.active-on .sw-num {
+            color: var(--green);
+        }
+
+        .sw-status-tag {
+            font-size: 9px;
+            letter-spacing: 0.5px;
+            color: #666;
+        }
+
+        .row.active-on .sw-status-tag {
+            color: #00ff41;
+            font-weight: bold;
+        }
+
+        .led {
+            width: 24px;
+            height: 24px;
+            background: #2b1111;
+            border-radius: 50%;
+            margin: auto;
+            border: 2px solid #111;
+            transition: 0.3s;
+        }
+
+        .led.on {
+            background: var(--green);
+            box-shadow: 0 0 18px var(--green), inset 0 0 6px white;
+            border-color: #fff;
+        }
+
+        /* QUICK PICKER CHIPS */
+        .quick-chips {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            padding: 8px;
+            background: #14171a;
+            border-radius: 6px;
+            border: 1px solid #282e36;
+        }
+
+        .quick-chips span {
+            font-size: 10px;
+            color: #888;
+            width: 100%;
+            margin-bottom: 2px;
+        }
+
+        .chip {
+            background: #252a30;
+            border: 1px solid #3d4550;
+            color: #ccc;
+            padding: 3px 8px;
+            font-size: 11px;
+            border-radius: 4px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .chip:hover {
+            background: var(--gold);
+            color: black;
+            border-color: var(--gold);
+        }
+
+        .btn-solve {
+            width: 100%;
+            padding: 16px;
+            background: var(--gold);
+            border: none;
+            color: black;
+            font-weight: bold;
+            font-size: 20px;
+            cursor: pointer;
+            margin-top: 12px;
+            text-transform: uppercase;
+            border-radius: 6px;
+            letter-spacing: 1px;
+            transition: all 0.2s;
+        }
+
+        .btn-solve:hover {
+            background: #d1b883;
+            box-shadow: 0 0 15px rgba(189, 163, 106, 0.5);
+        }
+
+        /* SOLUTION SUMMARY BOX */
+        #solution-box {
+            display: none;
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 6px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 16px;
+            line-height: 1.5;
+        }
+
+        #solution-box.success {
+            display: block;
+            background: rgba(0, 255, 65, 0.15);
+            border: 2px solid var(--green);
+            color: var(--green);
+        }
+
+        #solution-box.error {
+            display: block;
+            background: rgba(255, 68, 68, 0.15);
+            border: 2px solid var(--red);
+            color: var(--red);
+        }
+
+        .footer-info {
+            font-size: 11px;
+            color: #666;
+            margin-top: 15px;
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        /* WEBCAM MODAL */
+        #camera-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.85);
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        #camera-modal video {
+            max-width: 90vw;
+            max-height: 70vh;
+            border: 2px solid var(--gold);
+            border-radius: 8px;
+        }
+
+        .modal-btns {
+            display: flex;
+            gap: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>⚡ SCUM BUNKER SOLVER ⚡</h1>
+
+    <div class="main-layout">
+
+        <!-- LEFT PANEL: CAMERA & OCR SCANNER -->
+        <div class="scanner-panel">
+            <div class="panel-title">
+                <span>📷 เครื่องสแกนรูปภาพ (DUAL-COLUMN SCANNER)</span>
+                <span id="ocr-engine-tag" style="font-size: 10px; color: var(--green);">TESSERACT OCR</span>
+            </div>
+
+            <!-- ACTION BUTTONS -->
+            <div class="btn-group">
+                <!-- Mobile Camera Trigger -->
+                <button class="action-btn" onclick="document.getElementById('file-camera').click()">
+                    📸 ถ่ายรูป (Camera)
+                </button>
+                <input type="file" id="file-camera" accept="image/*" capture="environment" style="display:none" onchange="handleFileSelect(event)">
+
+                <!-- File Upload Trigger -->
+                <button class="action-btn" onclick="document.getElementById('file-upload').click()">
+                    📁 เลือกรูป (Upload)
+                </button>
+                <input type="file" id="file-upload" accept="image/*" style="display:none" onchange="handleFileSelect(event)">
+
+                <!-- Webcam Capture for PC -->
+                <button class="action-btn" onclick="openWebcamModal()">
+                    💻 เปิดกล้อง PC
+                </button>
+
+                <!-- Reset Box Positions -->
+                <button class="action-btn" onclick="resetCropBoxes()">
+                    🎯 รีเซ็ตตำแหน่งกรอบ
+                </button>
+
+                <!-- 1-Click Load Example from your Screenshot -->
+                <button class="action-btn" style="grid-column: span 2; background: #2d2618; border-color: var(--gold); color: var(--gold);" onclick="loadExampleData()">
+                    ⚡ โหลดค่าตรงตามรูปสกรีนช็อตล่าสุดของคุณ (60 ➔ 65 / 50)
+                </button>
+
+                <!-- Execute Scan -->
+                <button class="action-btn primary" id="btn-scan" onclick="scanAndSolve()">
+                    ⚡ สแกนอ่านค่าตามกรอบ (SCAN & SOLVE)
+                </button>
+            </div>
+
+            <!-- STATUS AND PROGRESS BAR -->
+            <div id="ocr-status">กดถ่ายรูป หรือกด <b>Ctrl+V</b> เพื่อวางรูปภาพสกรีนช็อต</div>
+            <div class="progress-bar-container" id="pbar-container">
+                <div class="progress-bar" id="pbar"></div>
+            </div>
+
+            <!-- IMAGE PREVIEW & INTERACTIVE FRAMES (TWO COLUMN BOXES!) -->
+            <div class="image-wrapper" id="drop-zone">
+                <div class="drop-hint" id="drop-hint">
+                    📷 <b>ถ่ายรูป หรือ ลากรูปภาพมาวางที่นี่</b><br>
+                    หรือกดปุ่ม <span>PrintScreen / Win+Shift+S</span> แล้วกด <span>Ctrl+V</span> เพื่อวางทันที
+                </div>
+                <img id="preview-img" alt="Bunker Preview">
+
+                <!-- Color-Coded Overlay Guide Frames -->
+                <div class="frame-overlay" id="frame-overlay">
+                    <!-- 1. YELLOW BOX A: COLUMN A (Red Channel, SW8A down to SW1A) -->
+                    <div class="crop-box" id="box-col-a" title="กรอบสีเหลือง ซ้าย: แผงสวิตช์ฝั่งสายแดง A (SW 8-1)">
+                        <span class="crop-box-label">🟡 COL A (SW 8-1)</span>
+                        <div class="col-grid" id="grid-col-a">
+                            <!-- 8 rows -->
+                        </div>
+                        <div class="crop-resize-handle" data-box="box-col-a"></div>
+                    </div>
+
+                    <!-- 2. YELLOW BOX B: COLUMN B (Blue Channel, SW8B down to SW1B) -->
+                    <div class="crop-box" id="box-col-b" title="กรอบสีเหลือง ขวา: แผงสวิตช์ฝั่งสายฟ้า B (SW 8-1)">
+                        <span class="crop-box-label">🟡 COL B (SW 8-1)</span>
+                        <div class="col-grid" id="grid-col-b">
+                            <!-- 8 rows -->
+                        </div>
+                        <div class="crop-resize-handle" data-box="box-col-b"></div>
+                    </div>
+
+                    <!-- 3. RED BOX: GOAL A -->
+                    <div class="crop-box" id="box-goala" title="กรอบสีแดง: Goal Red (Output A)">
+                        <span class="crop-box-label">🔴 GOAL A</span>
+                        <div class="crop-resize-handle" data-box="box-goala"></div>
+                    </div>
+
+                    <!-- 4. BLUE BOX: GOAL B -->
+                    <div class="crop-box" id="box-goalb" title="กรอบสีฟ้า: Goal Blue (Output B)">
+                        <span class="crop-box-label">🔵 GOAL B</span>
+                        <div class="crop-resize-handle" data-box="box-goalb"></div>
+                    </div>
+
+                    <!-- 5. GREEN BOX: INPUT -->
+                    <div class="crop-box" id="box-input" title="กรอบสีเขียว: จอ Input ด้านล่างซ้าย">
+                        <span class="crop-box-label">🟢 INPUT</span>
+                        <div class="crop-resize-handle" data-box="box-input"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- OCR REVIEW LIST -->
+            <div id="ocr-review-list" aria-live="polite"></div>
+
+            <!-- OPTIONAL GEMINI VISION ACCORDION -->
+            <details class="api-config" id="api-details">
+                <summary>✨ โหมด AI Vision (ผ่าน Gemini API)</summary>
+                <div style="margin-top: 8px; color: #888;">
+                    ใส่ Gemini API Key ฟรี เพื่อใช้ AI Vision ช่วยอ่านค่าทั้งแผง โดยไม่ต้องเล็งกรอบ:
+                    <input type="password" id="gemini-key" placeholder="AIzaSy... (บันทึกในเครื่องคุณเท่านั้น)" onchange="saveApiKey()">
+                </div>
+            </details>
+        </div>
+
+        <!-- RIGHT PANEL: SOLVER MACHINE -->
+        <div class="machine">
+            <div class="header-section">
+                <div class="display">
+                    <label>🟢 Input (ค่าเริ่ม)</label>
+                    <input type="text" id="inp" value="60">
+                </div>
+                <div class="display">
+                    <label>🔴 Goal Red (A)</label>
+                    <input type="text" id="ga" value="65" class="red-text">
+                </div>
+                <div class="display">
+                    <label>🔵 Goal Blue (B)</label>
+                    <input type="text" id="gb" value="50" class="blue-text">
+                </div>
+            </div>
+
+            <!-- SOLUTION RESULT BANNER -->
+            <div id="solution-box"></div>
+
+            <div id="rows-container">
+                <!-- SW8 at top to SW1 at bottom -->
+            </div>
+
+            <!-- QUICK INSERT CHIPS -->
+            <div class="quick-chips">
+                <span>⚡ ปุ่มลัดกรอกค่าด่วน (คลิกช่องที่ต้องการแล้วกดปุ่มด้านล่าง):</span>
+                <div class="chip" onclick="insertChip('*2')">*2</div>
+                <div class="chip" onclick="insertChip('/2')">/2</div>
+                <div class="chip" onclick="insertChip('+10')">+10</div>
+                <div class="chip" onclick="insertChip('+60')">+60</div>
+                <div class="chip" onclick="insertChip('+80')">+80</div>
+                <div class="chip" onclick="insertChip('+100')">+100</div>
+                <div class="chip" onclick="insertChip('-10')">-10</div>
+                <div class="chip" onclick="insertChip('-40')">-40</div>
+                <div class="chip" onclick="insertChip('-50')">-50</div>
+                <div class="chip" onclick="insertChip('')">✖ ล้างว่าง</div>
+            </div>
+
+            <button class="btn-solve" id="btn-calc" onclick="solve()">CALCULATE BYPASS</button>
+
+            
+        </div>
+
+    </div>
+
+    <!-- WEBCAM MODAL FOR PC -->
+    <div id="camera-modal">
+        <video id="webcam-video" autoplay playsinline></video>
+        <div class="modal-btns">
+            <button class="action-btn primary" onclick="captureWebcam()">📸 ถ่ายภาพนี้</button>
+            <button class="action-btn danger" onclick="closeWebcamModal()">✖ ยกเลิก</button>
+        </div>
+    </div>
+
+    <script src="ocr.js"></script>
+    <script>
+        // -------------------------------------------------------------
+        // 1. GENERATE SWITCH ROWS (SW8 TO SW1)
+        // -------------------------------------------------------------
+        const rowsContainer = document.getElementById('rows-container');
+        let rowsHtml = '';
+        for (let i = 7; i >= 0; i--) {
+            rowsHtml += `
+            <div class="row" id="row-${i}">
+                <div class="sw-num">
+                    <span>SW ${i + 1}</span>
+                    <span class="sw-status-tag" id="tag-${i}">[ปิด / OFF]</span>
+                </div>
+                <input type="text" id="r${i}a" class="red-text" placeholder="+0" autocomplete="off" onfocus="setActiveInput(this)">
+                <input type="text" id="r${i}b" class="blue-text" placeholder="+0" autocomplete="off" onfocus="setActiveInput(this)">
+                <div id="l${i}" class="led"></div>
+            </div>
+            `;
+        }
+        rowsContainer.innerHTML = rowsHtml;
+
+        // Fill Col A and Col B grids with 8 rows each
+        const gridColA = document.getElementById('grid-col-a');
+        const gridColB = document.getElementById('grid-col-b');
+        let htmlA = '', htmlB = '';
+        for (let i = 7; i >= 0; i--) {
+            htmlA += `<div class="col-cell"><div class="text-target">SW${i + 1}A</div></div>`;
+            htmlB += `<div class="col-cell"><div class="text-target">SW${i + 1}B</div></div>`;
+        }
+        gridColA.innerHTML = htmlA;
+        gridColB.innerHTML = htmlB;
+
+        // Active input tracking for quick chips
+        let lastActiveInput = null;
+        function setActiveInput(el) {
+            lastActiveInput = el;
+        }
+
+        function insertChip(val) {
+            if (lastActiveInput) {
+                lastActiveInput.value = val;
+                solve();
+            } else {
+                alert("กรุณาคลิกเลือกช่อง Input (สีแดงหรือฟ้า) ที่ต้องการกรอกค่าก่อนครับ");
+            }
+        }
+
+        // 1-Click Load Example from Screenshot
+        function loadExampleData() {
+            clearOcrReview();
+            document.getElementById('inp').value = '200';
+            document.getElementById('ga').value = '20';
+            document.getElementById('gb').value = '280';
+            const example = [
+                ['/2', '/2'], ['-20', ''], ['-10', '*2'], ['-20', '*2'],
+                ['', '+60'], ['*2', ''], ['/2', '+20'], ['-60', '']
+            ];
+            example.forEach(([a, b], row) => {
+                document.getElementById(`r${7 - row}a`).value = a;
+                document.getElementById(`r${7 - row}b`).value = b;
+            });
+
+            ocrStatus.innerText = "โหลดค่าจากรูปภาพเรียบร้อย! กำลังคำนวณ...";
+            ocrStatus.style.color = "var(--green)";
+            solve();
+        }
+
+        // -------------------------------------------------------------
+        // 2. BULLETPROOF SOLVER LOGIC
+        // -------------------------------------------------------------
+        function op(v, s) {
+            if (!s) return v;
+            s = s.toString().trim().replace(/\s+/g, '').replace(/x/gi, '*');
+            if (!s || s === '0' || s === '+0' || s === '-0') return v;
+
+            let operator = s[0];
+            let numStr = s.slice(1);
+            if (!'+-*/'.includes(operator)) {
+                if (s.startsWith('-')) {
+                    operator = '-';
+                    numStr = s.slice(1);
+                } else {
+                    operator = '+';
+                    numStr = s;
+                }
+            }
+            const num = parseFloat(numStr);
+            if (isNaN(num)) return v;
+
+            switch (operator) {
+                case '+': return v + num;
+                case '-': return v - num;
+                case '*': return v * num;
+                case '/': return num === 0 ? v : v / num;
+                default: return v;
+            }
+        }
+
+        function solve() {
+            document.getElementById('solution-box').style.removeProperty('display');
+            const inputVal = parseFloat(document.getElementById('inp').value) || 0;
+            const goalA = parseFloat(document.getElementById('ga').value);
+            const goalB = parseFloat(document.getElementById('gb').value);
+            const solBox = document.getElementById('solution-box');
+
+            if (isNaN(goalA) || isNaN(goalB)) {
+                solBox.className = 'error';
+                solBox.innerHTML = "⚠️ กรุณาระบุค่า Goal Red (A) และ Goal Blue (B)";
+                return false;
+            }
+
+            let rows = [];
+            for (let i = 0; i < 8; i++) {
+                rows.push({
+                    a: document.getElementById(`r${i}a`).value,
+                    b: document.getElementById(`r${i}b`).value
+                });
+                document.getElementById(`l${i}`).className = 'led';
+                document.getElementById(`row-${i}`).classList.remove('active-on');
+                document.getElementById(`tag-${i}`).innerText = '[ปิด / OFF]';
+            }
+
+            let bestDiff = 999999;
+            let bestA = 0, bestB = 0;
+
+            // Try all 256 switch combinations (0 = OFF, 1 = ON)
+            for (let i = 0; i < 256; i++) {
+                let curA = inputVal;
+                let curB = inputVal;
+
+                // ALWAYS EXECUTE FROM TOP (SW8 / index 7) TO BOTTOM (SW1 / index 0)
+                for (let j = 7; j >= 0; j--) {
+                    if ((i >> j) & 1) {
+                        curA = op(curA, rows[j].a);
+                        curB = op(curB, rows[j].b);
+                    }
+                }
+
+                const diff = Math.abs(curA - goalA) + Math.abs(curB - goalB);
+                if (diff < bestDiff) {
+                    bestDiff = diff;
+                    bestA = curA;
+                    bestB = curB;
+                }
+
+                // Match found!
+                if (Math.abs(curA - goalA) < 0.001 && Math.abs(curB - goalB) < 0.001) {
+                    let onList = [];
+                    for (let j = 0; j < 8; j++) {
+                        if ((i >> j) & 1) {
+                            document.getElementById(`l${j}`).className = 'led on';
+                            document.getElementById(`row-${j}`).classList.add('active-on');
+                            document.getElementById(`tag-${j}`).innerText = '[เปิด / ON 🟢]';
+                            onList.push(`SW ${j + 1}`);
+                        }
+                    }
+
+                    solBox.className = 'success';
+                    solBox.innerHTML = `
+                        🎉 ACCESS GRANTED!<br>
+                        👉 <b>เปิดสวิตช์: ${onList.length > 0 ? onList.join(', ') : '(ไม่ต้องเปิดสวิตช์ใดเลย)'}</b><br>
+                        <span style="font-size:12px; color:#fff;">(ค่าที่ได้: Red = ${curA}, Blue = ${curB})</span>
+                    `;
+                    return true;
+                }
+            }
+
+            solBox.className = 'error';
+            solBox.innerHTML = `
+                ❌ ไม่พบวิธีเปิดสวิตช์ที่ได้ผลลัพธ์ตรงเป๊ะ<br>
+                <span style="font-size:12px; color:#ccc;">
+                    เป้าหมาย: Red=${goalA}, Blue=${goalB}<br>
+                    ใกล้เคียงที่สุดที่ทำได้จากค่าที่กรอก: Red=${bestA}, Blue=${bestB}<br>
+                    💡 กรุณาตรวจสอบว่ามีช่องสวิตช์ใดอ่านผิด หรือกรอกตัวเลขตกหล่น
+                </span>
+            `;
+            return false;
+        }
+
+        // -------------------------------------------------------------
+        // 3. IMAGE LOADING & CLIPBOARD / DRAG & DROP
+        // -------------------------------------------------------------
+        const previewImg = document.getElementById('preview-img');
+        const dropZone = document.getElementById('drop-zone');
+        const dropHint = document.getElementById('drop-hint');
+        const frameOverlay = document.getElementById('frame-overlay');
+        const ocrStatus = document.getElementById('ocr-status');
+
+        let rawImage = null;
+
+        function loadImageSource(src) {
+            const img = new Image();
+            img.onload = () => {
+                rawImage = img;
+                previewImg.src = src;
+                previewImg.style.display = 'block';
+                dropHint.style.display = 'none';
+                dropZone.classList.add('has-image');
+                frameOverlay.style.display = 'block';
+                ocrStatus.innerHTML = "โหลดรูปภาพเรียบร้อย! ปรับกรอบหรือกด <b>'สแกนอ่านค่าตามกรอบ'</b> ได้เลย";
+                ocrStatus.style.color = "var(--green)";
+                requestAnimationFrame(updateOverlayScale);
+            };
+            img.src = src;
+        }
+
+        function handleFileSelect(e) {
+            const file = e.target.files && e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => loadImageSource(event.target.result);
+                reader.readAsDataURL(file);
+            }
+        }
+
+        window.addEventListener('paste', (e) => {
+            const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+            for (let item of items) {
+                if (item.type.indexOf('image') !== -1) {
+                    const blob = item.getAsFile();
+                    const reader = new FileReader();
+                    reader.onload = (event) => loadImageSource(event.target.result);
+                    reader.readAsDataURL(blob);
+                    e.preventDefault();
+                    break;
+                }
+            }
+        });
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = 'var(--gold)';
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#444';
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.borderColor = '#444';
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (event) => loadImageSource(event.target.result);
+                reader.readAsDataURL(e.dataTransfer.files[0]);
+            }
+        });
+
+        // -------------------------------------------------------------
+        // 4. WEBCAM CAPTURE FOR PC
+        // -------------------------------------------------------------
+        let webcamStream = null;
+        async function openWebcamModal() {
+            try {
+                webcamStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1920 } }
+                });
+                const video = document.getElementById('webcam-video');
+                video.srcObject = webcamStream;
+                document.getElementById('camera-modal').style.display = 'flex';
+            } catch (err) {
+                alert("ไม่สามารถเปิดกล้องได้: " + err.message);
+            }
+        }
+
+        function captureWebcam() {
+            const video = document.getElementById('webcam-video');
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            loadImageSource(canvas.toDataURL('image/jpeg', 0.95));
+            closeWebcamModal();
+        }
+
+        function closeWebcamModal() {
+            if (webcamStream) {
+                webcamStream.getTracks().forEach(track => track.stop());
+                webcamStream = null;
+            }
+            document.getElementById('camera-modal').style.display = 'none';
+        }
+
+        // -------------------------------------------------------------
+        // 5. INTERACTIVE GUIDE FRAMES (TWO SEPARATE COLUMNS)
+        // -------------------------------------------------------------
+        // Exactly calibrated default box coordinates matching SCUM bunker columns
+        const defaultBoxConfigs = {
+            'box-col-a': { x: 6.0, y: 5.1, w: 17.6, h: 79.4 },
+            'box-col-b': { x: 26.5, y: 5.1, w: 18.7, h: 79.4 },
+            'box-goala': { x: 71.3, y: 41.7, w: 18.3, h: 7.4 },
+            'box-goalb': { x: 71.3, y: 49.4, w: 18.3, h: 7.3 },
+            'box-input': { x: 9.0, y: 86.2, w: 18.0, h: 10.7 }
+        };
+
+        let currentBoxes = JSON.parse(JSON.stringify(defaultBoxConfigs));
+
+        function applyBoxStyles() {
+            for (let id in currentBoxes) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                const b = currentBoxes[id];
+                el.style.left = b.x + '%';
+                el.style.top = b.y + '%';
+                el.style.width = b.w + '%';
+                el.style.height = b.h + '%';
+            }
+        }
+
+        function resetCropBoxes() {
+            currentBoxes = JSON.parse(JSON.stringify(defaultBoxConfigs));
+            applyBoxStyles();
+            ocrStatus.innerText = "รีเซ็ตตำแหน่งกรอบเรียบร้อย";
+        }
+
+        function updateOverlayScale() {
+            if (!rawImage) return;
+            const imageRect = previewImg.getBoundingClientRect();
+            const dropRect = dropZone.getBoundingClientRect();
+            frameOverlay.style.width = imageRect.width + 'px';
+            frameOverlay.style.height = imageRect.height + 'px';
+            frameOverlay.style.left = (imageRect.left - dropRect.left - dropZone.clientLeft) + 'px';
+            frameOverlay.style.top = (imageRect.top - dropRect.top - dropZone.clientTop) + 'px';
+            applyBoxStyles();
+        }
+
+        window.addEventListener('resize', updateOverlayScale);
+
+        let activeAction = null;
+        document.querySelectorAll('.crop-box').forEach(box => {
+            box.addEventListener('mousedown', startDrag);
+            box.addEventListener('touchstart', startDrag, { passive: false });
+        });
+
+        document.querySelectorAll('.crop-resize-handle').forEach(handle => {
+            handle.addEventListener('mousedown', startResize);
+            handle.addEventListener('touchstart', startResize, { passive: false });
+        });
+
+        function getClientPos(e) {
+            if (e.touches && e.touches.length > 0) {
+                return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }
+            return { x: e.clientX, y: e.clientY };
+        }
+
+        function startDrag(e) {
+            if (e.target.classList.contains('crop-resize-handle')) return;
+            e.preventDefault();
+            const pos = getClientPos(e);
+            const boxId = this.id;
+            const b = currentBoxes[boxId];
+            activeAction = {
+                type: 'move',
+                boxId: boxId,
+                startX: pos.x,
+                startY: pos.y,
+                initX: b.x,
+                initY: b.y
+            };
+        }
+
+        function startResize(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            const pos = getClientPos(e);
+            const boxId = this.dataset.box;
+            const b = currentBoxes[boxId];
+            activeAction = {
+                type: 'resize',
+                boxId: boxId,
+                startX: pos.x,
+                startY: pos.y,
+                initW: b.w,
+                initH: b.h
+            };
+        }
+
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('touchmove', onPointerMove, { passive: false });
+
+        function onPointerMove(e) {
+            if (!activeAction) return;
+            e.preventDefault();
+            const pos = getClientPos(e);
+            const overlayRect = frameOverlay.getBoundingClientRect();
+            if (overlayRect.width === 0 || overlayRect.height === 0) return;
+
+            const dxPct = ((pos.x - activeAction.startX) / overlayRect.width) * 100;
+            const dyPct = ((pos.y - activeAction.startY) / overlayRect.height) * 100;
+            const b = currentBoxes[activeAction.boxId];
+
+            if (activeAction.type === 'move') {
+                b.x = Math.max(0, Math.min(100 - b.w, activeAction.initX + dxPct));
+                b.y = Math.max(0, Math.min(100 - b.h, activeAction.initY + dyPct));
+            } else if (activeAction.type === 'resize') {
+                b.w = Math.max(3, Math.min(100 - b.x, activeAction.initW + dxPct));
+                b.h = Math.max(2, Math.min(100 - b.y, activeAction.initH + dyPct));
+            }
+            applyBoxStyles();
+        }
+
+        window.addEventListener('mouseup', () => activeAction = null);
+        window.addEventListener('touchend', () => activeAction = null);
+
+        // -------------------------------------------------------------
+        // 6. IMAGE CROPPING & CLEANING FOR OCR
+        // -------------------------------------------------------------
+        function updateProgress(pct, msgText) {
+            const pbar = document.getElementById('pbar');
+            const pbarContainer = document.getElementById('pbar-container');
+            pbarContainer.style.display = 'block';
+            pbar.style.width = pct + '%';
+            if (msgText) ocrStatus.innerText = msgText;
+        }
+
+        async function scanAndSolve() {
+            if (!rawImage) {
+                alert("กรุณาถ่ายรูป, อัปโหลดรูป หรือกด Ctrl+V เพื่อวางรูปภาพก่อนครับ");
+                return;
+            }
+
+            if (ocrScanning || document.getElementById('btn-scan').disabled) return;
+            const apiKey = getSavedApiKey();
+            if (apiKey) {
+                await scanWithGeminiVision(apiKey);
+            } else {
+                await scanWithTesseract();
+            }
+        }
+
+        // -------------------------------------------------------------
+        // 8. GEMINI AI VISION
+        // -------------------------------------------------------------
+        function getSavedApiKey() {
+            return localStorage.getItem('bypass8_gemini_key') || '';
+        }
+
+        function saveApiKey() {
+            const key = document.getElementById('gemini-key').value.trim();
+            localStorage.setItem('bypass8_gemini_key', key);
+            updateEngineTag();
+        }
+
+        function updateEngineTag() {
+            const tag = document.getElementById('ocr-engine-tag');
+            if (getSavedApiKey()) {
+                tag.innerText = "✨ GEMINI AI VISION";
+                tag.style.color = "var(--gold)";
+            } else {
+                tag.innerText = "TESSERACT OCR";
+                tag.style.color = "var(--green)";
+            }
+        }
+
+        document.getElementById('gemini-key').value = getSavedApiKey();
+        updateEngineTag();
+
+        async function scanWithGeminiVision(apiKey) {
+            const btn = document.getElementById('btn-scan');
+            btn.disabled = true;
+            updateProgress(30, "กำลังส่งภาพให้ Gemini AI วิเคราะห์...");
+
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = rawImage.naturalWidth;
+                canvas.height = rawImage.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(rawImage, 0, 0);
+                const b64Data = canvas.toDataURL('image/png').split(',')[1];
+
+                const prompt = `You are a specialist in SCUM bunker electrical switchboard bypass puzzles.
+Analyze this image:
+1. "input": Starting number (green digits on bottom left/right display, e.g. 60 or 80).
+2. "goalA": OUTPUT A number (red wire / top display, e.g. 65).
+3. "goalB": OUTPUT B number (blue wire / bottom display, e.g. 50).
+4. "switches": Array of 8 switches from SW8 (top row) down to SW1 (bottom row).
+   Each switch has "a" (left red channel operation) and "b" (right blue channel operation).
+   Valid operations in SCUM are ONLY: "/2", "*2", "+10", "-10", "+20", "-20", "+40", "-40", "-50", "+60", "-60", "+80", "-80", "+100", "+150".
+   If a slot has no text display or is empty circuit board, set to "".
+   Read the actual image only. Do not use the example values below as defaults.
+   Preserve the operator exactly: /2 and *2 are different; + and - are different.
+   Never round or substitute a nearby number. Use null for any unreadable value.
+
+Return ONLY valid JSON with this schema:
+{
+  "input": 60,
+  "goalA": 65,
+  "goalB": 50,
+  "switches": [
+    {"row": 8, "a": "*2", "b": "/2"},
+    {"row": 7, "a": "+60", "b": "*2"},
+    {"row": 6, "a": "+10", "b": "*2"},
+    {"row": 5, "a": "", "b": "-40"},
+    {"row": 4, "a": "", "b": ""},
+    {"row": 3, "a": "/2", "b": "-10"},
+    {"row": 2, "a": "", "b": "/2"},
+    {"row": 1, "a": "*2", "b": ""}
+  ]
+}`;
+
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{
+                            parts: [
+                                { text: prompt },
+                                { inlineData: { mimeType: 'image/png', data: b64Data } }
+                            ]
+                        }]
+                    })
+                });
+
+                if (!res.ok) {
+                    throw new Error(`API Error ${res.status}: ${await res.text()}`);
+                }
+
+                updateProgress(80, "รับข้อมูลจาก AI เรียบร้อย! กำลังกรอกค่า...");
+                const data = await res.json();
+                const text = data.candidates[0].content.parts[0].text;
+                const jsonStr = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+                const parsed = JSON.parse(jsonStr);
+                validateVisionResult(parsed);
+
+                if (parsed.input !== undefined) document.getElementById('inp').value = parsed.input;
+                if (parsed.goalA !== undefined) document.getElementById('ga').value = parsed.goalA;
+                if (parsed.goalB !== undefined) document.getElementById('gb').value = parsed.goalB;
+
+                if (parsed.switches && Array.isArray(parsed.switches)) {
+                    parsed.switches.forEach(sw => {
+                        const idx = sw.row - 1;
+                        if (idx >= 0 && idx < 8) {
+                            document.getElementById(`r${idx}a`).value = sw.a || '';
+                            document.getElementById(`r${idx}b`).value = sw.b || '';
+                        }
+                    });
+                }
+
+                updateProgress(100, "AI วิเคราะห์สำเร็จ!");
+                setTimeout(() => {
+                    document.getElementById('pbar-container').style.display = 'none';
+                }, 1000);
+
+                solve();
+            } catch (err) {
+                console.error(err);
+                ocrStatus.innerHTML = `<span style="color:var(--red);">Gemini Error: ${err.message}</span>`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Run initial solve on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadExampleData();
+        });
+    </script>
+
+</body>
+
+</html>
