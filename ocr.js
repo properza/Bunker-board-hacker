@@ -1,4 +1,149 @@
 // OCR for the green phosphor displays. Keep operators; never guess a missing sign.
+function createDefaultTextTargets() {
+  const targets = {};
+  for (let row = 0; row < 8; row++) for (const column of ['a', 'b']) {
+    targets[`r${row}${column}`] = { x: 15, y: 6, w: 70, h: 32 };
+  }
+  return targets;
+}
+
+function adjustTextTarget(initial, dx, dy, resize) {
+  const b = { ...initial };
+  if (resize) {
+    b.w = Math.max(10, Math.min(100 - b.x, b.w + dx));
+    b.h = Math.max(10, Math.min(100 - b.y, b.h + dy));
+  } else {
+    b.x = Math.max(0, Math.min(100 - b.w, b.x + dx));
+    b.y = Math.max(0, Math.min(100 - b.h, b.y + dy));
+  }
+  return b;
+}
+
+function switchCropRect(box, row, target, image) {
+  const columnW = box.w / 100 * image.naturalWidth;
+  const rowH = box.h / 100 * image.naturalHeight / 8;
+  return [box.x / 100 * image.naturalWidth + columnW * target.x / 100,
+    box.y / 100 * image.naturalHeight + row * rowH + rowH * target.y / 100,
+    columnW * target.w / 100, rowH * target.h / 100];
+}
+
+function autoDetectBlackSlots(image, boxes, existingTargets) {
+  const targets = existingTargets ? { ...existingTargets } : createDefaultTextTargets();
+  if (!image || !boxes) return targets;
+  const w = image.naturalWidth || image.width;
+  const h = image.naturalHeight || image.height;
+  if (!w || !h) return targets;
+
+  let pixels = null;
+  if (image.data && (ArrayBuffer.isView(image.data) || image.data.BYTES_PER_ELEMENT || typeof image.data.length === 'number')) {
+    pixels = image.data;
+  } else if (typeof document !== 'undefined') {
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0);
+    pixels = ctx.getImageData(0, 0, w, h).data;
+  } else {
+    return targets;
+  }
+
+  for (const col of ['a', 'b']) {
+    const box = boxes[`box-col-${col}`];
+    if (!box) continue;
+    const colX = (box.x / 100) * w;
+    const colY = (box.y / 100) * h;
+    const colW = (box.w / 100) * w;
+    const colH = (box.h / 100) * h;
+    const rowH = colH / 8;
+
+    const detected = [];
+
+    for (let row = 0; row < 8; row++) {
+      const swIndex = 7 - row;
+      const key = `r${swIndex}${col}`;
+      const cellX = Math.round(colX);
+      const cellY = Math.round(colY + row * rowH);
+      const cellW = Math.round(colW);
+      const cellH = Math.round(rowH);
+
+      let minGX = cellW, maxGX = -1, minGY = cellH, maxGY = -1, greenCount = 0;
+      const yLimit = Math.min(cellY + Math.round(cellH * 0.48), h);
+      const yStart = Math.min(cellY + Math.max(1, Math.round(cellH * 0.03)), h);
+
+      for (let y = yStart; y < yLimit; y++) {
+        const rowOffset = y * (w * 4);
+        const xLimit = Math.min(cellX + cellW, w);
+        const xStart = Math.max(0, cellX);
+
+        for (let x = xStart; x < xLimit; x++) {
+          const p = rowOffset + (x * 4);
+          const r = pixels[p], g = pixels[p + 1], b = pixels[p + 2];
+          const isGreen = g >= 80 && (g - r) >= 6 && (g - b) >= 3;
+          const relX = x - cellX, relY = y - cellY;
+
+          if (isGreen) {
+            greenCount++;
+            if (relX < minGX) minGX = relX;
+            if (relX > maxGX) maxGX = relX;
+            if (relY < minGY) minGY = relY;
+            if (relY > maxGY) maxGY = relY;
+          }
+        }
+      }
+
+      if (greenCount >= 6) {
+        // Exactly 1px padding around the detected green text
+        const pad = 1;
+        const targetPixelX = Math.max(0, minGX - pad);
+        const targetPixelY = Math.max(0, minGY - pad);
+        const targetPixelW = Math.min(cellW - targetPixelX, (maxGX - minGX + 1) + (2 * pad));
+        const targetPixelH = Math.min(cellH - targetPixelY, (maxGY - minGY + 1) + (2 * pad));
+
+        const targetX = Math.round((targetPixelX / cellW) * 1000) / 10;
+        const targetY = Math.round((targetPixelY / cellH) * 1000) / 10;
+        const targetW = Math.round((targetPixelW / cellW) * 1000) / 10;
+        const targetH = Math.round((targetPixelH / cellH) * 1000) / 10;
+
+        const slot = { x: targetX, y: targetY, w: targetW, h: targetH, hasText: true, greenCount };
+        targets[key] = slot;
+        detected.push(slot);
+      } else {
+        targets[key] = { hasText: false };
+      }
+    }
+
+    let medianX = col === 'a' ? 14 : 18;
+    let medianY = 6;
+    let medianW = 68;
+    let medianH = 28;
+
+    const textSlots = detected.filter(d => d.hasText);
+    if (textSlots.length > 0) {
+      const getMed = (arr, prop) => {
+        const s = arr.map(a => a[prop]).sort((a, b) => a - b);
+        return s[Math.floor(s.length / 2)];
+      };
+      medianX = getMed(textSlots, 'x');
+      medianY = getMed(textSlots, 'y');
+      medianW = getMed(textSlots, 'w');
+      medianH = getMed(textSlots, 'h');
+    }
+
+    for (let row = 0; row < 8; row++) {
+      const swIndex = 7 - row;
+      const key = `r${swIndex}${col}`;
+      if (!targets[key] || !targets[key].hasText) {
+        targets[key] = { x: medianX, y: medianY, w: medianW, h: medianH, hasText: false };
+      } else {
+        const { x, y, w, h } = targets[key];
+        targets[key] = { x, y, w, h, hasText: true };
+      }
+    }
+  }
+
+  return targets;
+}
 function cleanSwitchToken(text) {
   const token = (text || "")
     .trim()
@@ -83,6 +228,147 @@ function switchTokenFromShape(text, operator) {
   const sign =
     operator.kind === "compact" ? (digits === "2" ? "*" : "+") : operator.kind;
   return cleanSwitchToken(sign + digits);
+}
+
+// Deterministic switch classifier for SCUM Bunker switches from green pixel mask
+function classifySwitchFromMask(mask, width, height) {
+  if (!mask || width <= 0 || height <= 0) return "";
+
+  const colOccupied = new Array(width).fill(0);
+  let totalPixels = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (mask[y * width + x]) {
+        colOccupied[x]++;
+        totalPixels++;
+      }
+    }
+  }
+  if (totalPixels < 10) return "";
+
+  let first = 0;
+  while (first < width && colOccupied[first] === 0) first++;
+  if (first >= width) return "";
+
+  let opEnd = first;
+  while (opEnd + 1 < width && colOccupied[opEnd + 1] > 0) opEnd++;
+
+  let digitStart = opEnd + 1;
+  while (digitStart < width && colOccupied[digitStart] === 0) digitStart++;
+  if (digitStart >= width) return "";
+
+  // Operator shape detection
+  const opWidth = opEnd - first + 1;
+  let opTop = height, opBottom = -1;
+  const opPoints = [];
+  for (let y = 0; y < height; y++) {
+    for (let x = first; x <= opEnd; x++) {
+      if (mask[y * width + x]) {
+        opPoints.push([x, y]);
+        if (y < opTop) opTop = y;
+        if (y > opBottom) opBottom = y;
+      }
+    }
+  }
+  const opH = opBottom - opTop + 1;
+  const meanX = opPoints.reduce((s, p) => s + p[0], 0) / opPoints.length;
+  const meanY = opPoints.reduce((s, p) => s + p[1], 0) / opPoints.length;
+  let xx = 0, yy = 0, xy = 0;
+  for (const [x, y] of opPoints) {
+    xx += (x - meanX) ** 2;
+    yy += (y - meanY) ** 2;
+    xy += (x - meanX) * (y - meanY);
+  }
+  const corr = xy / Math.sqrt(xx * yy || 1);
+
+  let op = null;
+  if (corr < -0.55 && opH > opWidth * 0.8) {
+    op = "/";
+  } else if (opWidth / opH >= 1.6 && opH <= 5) {
+    op = "-";
+  } else {
+    op = "compact";
+  }
+
+  // Segment isolated digit glyphs separated by blank columns
+  const glyphs = [];
+  let inGlyph = false;
+  let gStart = -1;
+  for (let x = digitStart; x < width; x++) {
+    let colHasPixel = false;
+    for (let y = 0; y < height; y++) {
+      if (mask[y * width + x]) { colHasPixel = true; break; }
+    }
+    if (colHasPixel) {
+      if (!inGlyph) { inGlyph = true; gStart = x; }
+    } else {
+      if (inGlyph) {
+        glyphs.push({ startX: gStart, endX: x - 1, width: x - gStart });
+        inGlyph = false;
+      }
+    }
+  }
+  if (inGlyph) {
+    glyphs.push({ startX: gStart, endX: width - 1, width: width - gStart });
+  }
+
+  if (glyphs.length === 0) return "";
+
+  // Single digit glyph in bunker puzzle is always '2' (*2 or /2)
+  if (glyphs.length === 1) {
+    const finalOp = (op === "/" ? "/" : "*");
+    return `${finalOp}2`;
+  }
+
+  const sign = (op === "-" ? "-" : "+");
+
+  // Three digit glyphs: 100 or 150
+  if (glyphs.length >= 3) {
+    const g2 = glyphs[1];
+    let rowMidPixels = 0;
+    const midY = Math.floor(height / 2);
+    for (let x = g2.startX; x <= g2.endX; x++) {
+      if (mask[midY * width + x]) rowMidPixels++;
+    }
+    return rowMidPixels >= 3 ? `${sign}150` : `${sign}100`;
+  }
+
+  // Two digit glyphs: 10, 20, 40, 50, 60, 80
+  const g1 = glyphs[0];
+  let minY = height, maxY = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = g1.startX; x <= g1.endX; x++) {
+      if (mask[y * width + x]) {
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  const gw = g1.endX - g1.startX + 1;
+  const gh = maxY - minY + 1;
+  const at = (rx, ry) => {
+    const x = g1.startX + Math.round(rx * (gw - 1));
+    const y = minY + Math.round(ry * (gh - 1));
+    return mask[y * width + x] === 1;
+  };
+
+  const topL = at(0.15, 0.25);
+  const topR = at(0.85, 0.25);
+  const botL = at(0.15, 0.75);
+  const botR = at(0.85, 0.75);
+  const lowerDiagR = at(0.85, 0.60);
+
+  let d1 = "8";
+  if (!botL && !botR) d1 = "1";
+  else if (topR && !topL && !lowerDiagR) d1 = "2";
+  else if (topL && !topR && botL && botR) d1 = "6";
+  else if (topL && topR && botL && botR) d1 = "8";
+  else if (topL && topR && !botL && botR) d1 = "4";
+  else if (topL && !topR && !botL && botR) d1 = "5";
+  else if (!topR) d1 = "6";
+  else if (!botL) d1 = "2";
+
+  return cleanSwitchToken(`${sign}${d1}0`);
 }
 
 function validateVisionResult(result) {
@@ -245,10 +531,12 @@ function extractCleanCanvas(sx, sy, sw, sh, mode = 0, image = rawImage) {
       inkH * scale,
     );
   }
+  const classifiedToken = classifySwitchFromMask(kept, crop.width, crop.height);
   return {
     canvas: output,
     digitsCanvas,
     operator,
+    classifiedToken,
     count,
     fillRatio: count / mask.length,
     inkW,
@@ -283,6 +571,13 @@ async function recognizeDisplay(worker, rect, isSwitch, image) {
   // Blank only when both masks contain virtually no green strokes.
   if (crops.every((c) => c.count < 3)) {
     return { value: "", certain: isSwitch, preview: crops[1].canvas };
+  }
+  if (isSwitch) {
+    for (const crop of crops) {
+      if (crop.classifiedToken) {
+        return { value: crop.classifiedToken, certain: true, preview: crop.canvas };
+      }
+    }
   }
   const votes = new Map();
   let best = "";
@@ -361,6 +656,7 @@ async function scanWithTesseract() {
   // Snapshot the image and frames so dragging during a scan cannot mix regions.
   const image = rawImage,
     boxes = JSON.parse(JSON.stringify(currentBoxes));
+  const targets = autoDetectBlackSlots(image, boxes, currentTextTargets);
   const jobs = [];
   for (const [boxId, fieldId, label] of [
     ["box-goala", "ga", "Goal A"],
@@ -368,33 +664,27 @@ async function scanWithTesseract() {
     ["box-input", "inp", "Input"],
   ]) {
     const b = boxes[boxId];
-    // Inset excludes the colored annotations in the example screenshot.
+    // Slight inset avoids bounding box border strokes while keeping wide numbers intact
     jobs.push({
       fieldId,
       label,
       isSwitch: false,
       rect: [
-        ((b.x + b.w * 0.08) / 100) * image.naturalWidth,
-        ((b.y + b.h * 0.08) / 100) * image.naturalHeight,
-        ((b.w * 0.84) / 100) * image.naturalWidth,
-        ((b.h * 0.84) / 100) * image.naturalHeight,
+        ((b.x + b.w * 0.02) / 100) * image.naturalWidth,
+        ((b.y + b.h * 0.02) / 100) * image.naturalHeight,
+        ((b.w * 0.96) / 100) * image.naturalWidth,
+        ((b.h * 0.96) / 100) * image.naturalHeight,
       ],
     });
   }
   for (const column of ["a", "b"]) {
     const b = boxes[`box-col-${column}`];
-    const rowH = ((b.h / 100) * image.naturalHeight) / 8;
     for (let row = 0; row < 8; row++)
       jobs.push({
         fieldId: `r${7 - row}${column}`,
         label: `SW ${8 - row} ${column.toUpperCase()}`,
         isSwitch: true,
-        rect: [
-          ((b.x + b.w * 0.15) / 100) * image.naturalWidth,
-          (b.y / 100) * image.naturalHeight + row * rowH + rowH * 0.06,
-          ((b.w * 0.7) / 100) * image.naturalWidth,
-          rowH * 0.32,
-        ],
+        rect: switchCropRect(b, row, targets[`r${7 - row}${column}`], image),
       });
   }
   // Do not leave values from an earlier image when OCR fails.

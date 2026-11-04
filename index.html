@@ -210,7 +210,7 @@
 
         /* TWO SEPARATE COLUMN BOXES (A & B) */
         #box-col-a {
-            border: 2px solid var(--yellow);
+            outline: 2px solid var(--yellow);
             background: rgba(255, 215, 0, 0.08);
         }
 
@@ -224,7 +224,7 @@
         }
 
         #box-col-b {
-            border: 2px solid var(--yellow);
+            outline: 2px solid var(--yellow);
             background: rgba(255, 215, 0, 0.08);
         }
 
@@ -247,13 +247,13 @@
         }
 
         .col-cell {
-            border-bottom: 1px dashed rgba(255, 215, 0, 0.4);
+            box-shadow: inset 0 -1px rgba(255, 215, 0, 0.4);
             position: relative;
             overflow: hidden;
         }
 
         .col-cell:last-child {
-            border-bottom: none;
+            box-shadow: none;
         }
 
         /* Green text display target indicator inside each switch */
@@ -264,14 +264,40 @@
             width: 70%;
             height: 32%;
             border: 1px solid rgba(0, 255, 65, 0.9);
-            background: rgba(0, 255, 65, 0.2);
+            background: rgba(0, 255, 65, 0.08);
+            pointer-events: auto;
+            touch-action: none;
+            cursor: move;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 8px;
             color: #00ff41;
             font-weight: bold;
+            transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
         }
+
+        .col-cell .text-target.has-green-text {
+            border: 1.5px solid #00ff41;
+            background: rgba(0, 255, 65, 0.22);
+            box-shadow: 0 0 6px rgba(0, 255, 65, 0.55);
+        }
+
+        .col-cell .text-target.empty-slot {
+            border: 1px dashed rgba(255, 255, 255, 0.25);
+            background: rgba(0, 0, 0, 0.12);
+            opacity: 0.45;
+        }
+
+        .text-target:focus { outline: 2px solid white; z-index: 2; }
+        .target-label { opacity: 0; pointer-events: none; background: #101214; }
+        .text-target:hover .target-label, .text-target:focus .target-label { opacity: 1; }
+        .target-resize-handle {
+            position: absolute; right: 0; bottom: 0;
+            width: 9px; height: 9px; background: var(--green);
+            cursor: se-resize; touch-action: none;
+        }
+        .crop-help { font-size: 12px; line-height: 1.6; color: #aaa; margin: 0; }
 
         /* Goal A (Red) */
         #box-goala {
@@ -656,6 +682,11 @@
                     🎯 รีเซ็ตตำแหน่งกรอบ
                 </button>
 
+                <!-- Auto Snap to Black Slots -->
+                <button class="action-btn" style="background:#1b3024; border-color:var(--green); color:var(--green);" onclick="autoDetectSlots(true)">
+                    🎯 ล็อคช่องดำอัตโนมัติ
+                </button>
+
                 <!-- 1-Click Load Example from your Screenshot -->
                 <button class="action-btn" style="grid-column: span 2; background: #2d2618; border-color: var(--gold); color: var(--gold);" onclick="loadExampleData()">
                     ⚡ โหลดค่าตรงตามรูปสกรีนช็อตล่าสุดของคุณ (60 ➔ 65 / 50)
@@ -674,6 +705,7 @@
             </div>
 
             <!-- IMAGE PREVIEW & INTERACTIVE FRAMES (TWO COLUMN BOXES!) -->
+            <p class="crop-help">ลากกรอบเหลืองเพื่อย้ายทั้งคอลัมน์ • ลากช่องเขียวเพื่อเล็งข้อความแต่ละแถว • ลากมุมขวาล่างเพื่อปรับขนาด<br>ครอบให้ครบทั้งเครื่องหมายและตัวเลข โดยหลีกเลี่ยงไฟและอุปกรณ์ข้างเคียง (ใช้ปุ่มลูกศรขยับช่องที่เลือก หรือ Shift + ลูกศรเพื่อปรับขนาด)</p>
             <div class="image-wrapper" id="drop-zone">
                 <div class="drop-hint" id="drop-hint">
                     📷 <b>ถ่ายรูป หรือ ลากรูปภาพมาวางที่นี่</b><br>
@@ -816,8 +848,8 @@
         const gridColB = document.getElementById('grid-col-b');
         let htmlA = '', htmlB = '';
         for (let i = 7; i >= 0; i--) {
-            htmlA += `<div class="col-cell"><div class="text-target">SW${i + 1}A</div></div>`;
-            htmlB += `<div class="col-cell"><div class="text-target">SW${i + 1}B</div></div>`;
+            htmlA += `<div class="col-cell"><div class="text-target" data-target="r${i}a" tabindex="0" role="group" aria-label="พื้นที่อ่าน SW${i + 1} A"><span class="target-label">SW${i + 1}A</span><span class="target-resize-handle"></span></div></div>`;
+            htmlB += `<div class="col-cell"><div class="text-target" data-target="r${i}b" tabindex="0" role="group" aria-label="พื้นที่อ่าน SW${i + 1} B"><span class="target-label">SW${i + 1}B</span><span class="target-resize-handle"></span></div></div>`;
         }
         gridColA.innerHTML = htmlA;
         gridColB.innerHTML = htmlB;
@@ -991,7 +1023,10 @@
                 frameOverlay.style.display = 'block';
                 ocrStatus.innerHTML = "โหลดรูปภาพเรียบร้อย! ปรับกรอบหรือกด <b>'สแกนอ่านค่าตามกรอบ'</b> ได้เลย";
                 ocrStatus.style.color = "var(--green)";
-                requestAnimationFrame(updateOverlayScale);
+                requestAnimationFrame(() => {
+                    updateOverlayScale();
+                    autoDetectSlots();
+                });
             };
             img.src = src;
         }
@@ -1080,12 +1115,31 @@
         const defaultBoxConfigs = {
             'box-col-a': { x: 6.0, y: 5.1, w: 17.6, h: 79.4 },
             'box-col-b': { x: 26.5, y: 5.1, w: 18.7, h: 79.4 },
-            'box-goala': { x: 71.3, y: 41.7, w: 18.3, h: 7.4 },
-            'box-goalb': { x: 71.3, y: 49.4, w: 18.3, h: 7.3 },
-            'box-input': { x: 9.0, y: 86.2, w: 18.0, h: 10.7 }
+            'box-goala': { x: 69.5, y: 41.7, w: 23.0, h: 7.4 },
+            'box-goalb': { x: 69.5, y: 49.4, w: 23.0, h: 7.3 },
+            'box-input': { x: 8.5, y: 86.2, w: 21.0, h: 10.7 }
         };
 
         let currentBoxes = JSON.parse(JSON.stringify(defaultBoxConfigs));
+        let currentTextTargets = createDefaultTextTargets();
+
+        function applyTextTargetStyles() {
+            document.querySelectorAll('.text-target').forEach(el => {
+                const b = currentTextTargets[el.dataset.target];
+                if (!b) return;
+                el.style.left = b.x + '%'; el.style.top = b.y + '%';
+                el.style.width = b.w + '%'; el.style.height = b.h + '%';
+                if (b.hasText === true) {
+                    el.classList.add('has-green-text');
+                    el.classList.remove('empty-slot');
+                } else if (b.hasText === false) {
+                    el.classList.add('empty-slot');
+                    el.classList.remove('has-green-text');
+                } else {
+                    el.classList.remove('has-green-text', 'empty-slot');
+                }
+            });
+        }
 
         function applyBoxStyles() {
             for (let id in currentBoxes) {
@@ -1099,9 +1153,27 @@
             }
         }
 
+        function autoDetectSlots(notify = false) {
+            if (!rawImage) return;
+            try {
+                currentTextTargets = autoDetectBlackSlots(rawImage, currentBoxes, currentTextTargets);
+                applyTextTargetStyles();
+                if (notify) {
+                    ocrStatus.innerHTML = "🎯 ล็อคเส้นสีเขียวเข้าช่องดำอัตโนมัติเรียบร้อย!";
+                    ocrStatus.style.color = "var(--green)";
+                }
+            } catch (err) {
+                console.warn("Auto-detect slots warning:", err);
+            }
+        }
+
         function resetCropBoxes() {
+            activeAction = null;
             currentBoxes = JSON.parse(JSON.stringify(defaultBoxConfigs));
+            currentTextTargets = createDefaultTextTargets();
+            applyTextTargetStyles();
             applyBoxStyles();
+            autoDetectSlots();
             ocrStatus.innerText = "รีเซ็ตตำแหน่งกรอบเรียบร้อย";
         }
 
@@ -1119,6 +1191,30 @@
         window.addEventListener('resize', updateOverlayScale);
 
         let activeAction = null;
+        document.querySelectorAll('.text-target').forEach(target => {
+            const startTargetDrag = e => {
+                e.stopPropagation(); e.preventDefault();
+                target.focus({ preventScroll: true });
+                const pos = getClientPos(e);
+                activeAction = {
+                    targetKey: target.dataset.target,
+                    type: e.target.classList.contains('target-resize-handle') ? 'resize' : 'move',
+                    startX: pos.x, startY: pos.y,
+                    initial: { ...currentTextTargets[target.dataset.target] },
+                    rect: target.parentElement.getBoundingClientRect()
+                };
+            };
+            target.addEventListener('mousedown', startTargetDrag);
+            target.addEventListener('touchstart', startTargetDrag, { passive: false });
+            target.addEventListener('keydown', e => {
+                const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+                if (!delta) return;
+                e.preventDefault(); e.stopPropagation();
+                const key = target.dataset.target;
+                currentTextTargets[key] = adjustTextTarget(currentTextTargets[key], delta[0], delta[1], e.shiftKey);
+                applyTextTargetStyles();
+            });
+        });
         document.querySelectorAll('.crop-box').forEach(box => {
             box.addEventListener('mousedown', startDrag);
             box.addEventListener('touchstart', startDrag, { passive: false });
@@ -1175,6 +1271,15 @@
             if (!activeAction) return;
             e.preventDefault();
             const pos = getClientPos(e);
+            if (activeAction.targetKey) {
+                const { rect, initial, targetKey, type } = activeAction;
+                if (!rect.width || !rect.height) return;
+                currentTextTargets[targetKey] = adjustTextTarget(initial,
+                    (pos.x - activeAction.startX) / rect.width * 100,
+                    (pos.y - activeAction.startY) / rect.height * 100, type === 'resize');
+                applyTextTargetStyles();
+                return;
+            }
             const overlayRect = frameOverlay.getBoundingClientRect();
             if (overlayRect.width === 0 || overlayRect.height === 0) return;
 
@@ -1192,8 +1297,17 @@
             applyBoxStyles();
         }
 
-        window.addEventListener('mouseup', () => activeAction = null);
-        window.addEventListener('touchend', () => activeAction = null);
+        function handlePointerEnd() {
+            const wasColBox = activeAction && (activeAction.boxId === 'box-col-a' || activeAction.boxId === 'box-col-b');
+            activeAction = null;
+            if (wasColBox && rawImage) {
+                autoDetectSlots();
+            }
+        }
+        window.addEventListener('mouseup', handlePointerEnd);
+        window.addEventListener('touchend', handlePointerEnd);
+        window.addEventListener('touchcancel', () => activeAction = null);
+        window.addEventListener('blur', () => activeAction = null);
 
         // -------------------------------------------------------------
         // 6. IMAGE CROPPING & CLEANING FOR OCR
